@@ -29,17 +29,25 @@ npx wrangler secret put API_KEY
 
 ## Available Models
 
+The model list is **not hardcoded** — it is fetched at runtime from upstream's own
+[`constants/model.ts`](https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/constants/model.ts)
+and cached for 1 hour (a snapshot in `src/config.ts` is used if that fetch fails).
+Model names are the last path segment of the upstream id, and the first active
+model is the default.
+
+As of writing:
+
 | Model | Provider |
 |---|---|
-| `gpt-5.4-nano` (default) | OpenAI |
-| `gpt-5.4-mini` | OpenAI |
+| `gpt-5.6-luna` (default) | OpenAI |
 | `gemini-3.1-flash-lite` | Google |
-| `grok-4.1-fast` | xAI |
-| `grok-3-mini` | xAI |
-| `llama-4-scout-17b` | Groq |
-| `qwen3-32b` | Groq |
+| `grok-4-1-fast` | xAI |
+| `deepseek-v4-flash` | DeepSeek |
+| `gpt-oss-20b` | Groq |
+| `gpt-oss-120b` | Groq |
 
-Use `GET /v1/models` to check current availability.
+Use `GET /v1/models` for the live list. `node test-models.mjs` verifies the
+upstream list still parses.
 
 ## API Endpoints
 
@@ -62,7 +70,7 @@ curl https://<your-worker>.workers.dev/v1/chat/completions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-5.4-nano",
+    "model": "gpt-5.6-luna",
     "stream": true,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
@@ -72,7 +80,7 @@ curl https://<your-worker>.workers.dev/v1/chat/completions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-5.4-nano",
+    "model": "gpt-5.6-luna",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
@@ -88,7 +96,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-5.4-nano",
+    model="gpt-5.6-luna",
     messages=[{"role": "user", "content": "Hello!"}],
 )
 print(response.choices[0].message.content)

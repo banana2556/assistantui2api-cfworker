@@ -7,7 +7,7 @@
  * Ported from: https://github.com/XXXxx7258/assistant-2api (Python/FastAPI)
  */
 
-import { type Env, ACTIVE_MODELS, MODEL_MAP, DEFAULT_MODEL } from "./config";
+import { type Env, getCatalog } from "./config";
 import { openaiToAiSdk, genId } from "./converter/messages";
 import {
   convertStreamToOpenAI,
@@ -73,29 +73,19 @@ function handleHealth(): Response {
   return jsonResponse({ status: "ok" });
 }
 
-/** GET /v1/models — active models */
-function handleModels(): Response {
+/** GET /v1/models — active models (GET /v1/models/all includes disabled ones) */
+async function handleModels(all: boolean): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
-  const data = Object.entries(ACTIVE_MODELS).map(([shortName, fullId]) => ({
-    id: shortName,
-    object: "model",
-    created: now,
-    owned_by: fullId.split("/")[0],
-  }));
-  return jsonResponse({ object: "list", data });
-}
-
-/** GET /v1/models/all — all models including disabled */
-function handleAllModels(): Response {
-  const now = Math.floor(Date.now() / 1000);
-  const data = Object.entries(MODEL_MAP).map(([shortName, info]) => ({
-    id: shortName,
-    object: "model",
-    created: now,
-    owned_by: info.id.split("/")[0],
-    disabled: info.disabled,
-    context_window: info.contextWindow,
-  }));
+  const { map } = await getCatalog();
+  const data = Object.entries(map)
+    .filter(([, info]) => all || !info.disabled)
+    .map(([shortName, info]) => ({
+      id: shortName,
+      object: "model",
+      created: now,
+      owned_by: info.id.includes("/") ? info.id.split("/")[0] : "openai",
+      ...(all ? { disabled: info.disabled, context_window: info.contextWindow } : {}),
+    }));
   return jsonResponse({ object: "list", data });
 }
 
@@ -108,15 +98,16 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
     return errorResponse("Invalid JSON body", "invalid_request_error");
   }
 
+  const catalog = await getCatalog();
   const requestId = `chatcmpl-${genId("", 24)}`;
-  const model = body.model || DEFAULT_MODEL;
+  const model = body.model || catalog.defaultModel;
   const stream = body.stream === true;
   const tools = body.tools || null;
 
   // Convert OpenAI format to AI SDK v6 format
   let payload: Record<string, any>;
   try {
-    payload = openaiToAiSdk(body.messages || [], model, tools);
+    payload = openaiToAiSdk(body.messages || [], model, catalog, tools);
   } catch (e: any) {
     return errorResponse(`Invalid request: ${e.message}`, "invalid_request_error");
   }
@@ -197,10 +188,10 @@ export default {
 
     // Route dispatch
     if (request.method === "GET" && path === "/v1/models") {
-      return handleModels();
+      return handleModels(false);
     }
     if (request.method === "GET" && path === "/v1/models/all") {
-      return handleAllModels();
+      return handleModels(true);
     }
     if (request.method === "POST" && path === "/v1/chat/completions") {
       return handleChatCompletions(request, env);

@@ -8,40 +8,83 @@ export interface Env {
 }
 
 export interface ModelInfo {
+  /** assistant-ui API identifier, e.g. "groq/openai/gpt-oss-20b" */
   id: string;
   disabled: boolean;
   contextWindow: number;
 }
 
+export interface ModelCatalog {
+  /** short name -> info */
+  map: Record<string, ModelInfo>;
+  /** short name of the first active model */
+  defaultModel: string;
+}
+
 /** Maximum length for system prompts (matches upstream validation). */
 export const MAX_SYSTEM_LENGTH = 4000;
 
-/**
- * OpenAI-compatible short name -> assistant-ui API identifier.
- * `disabled: true` means the model exists upstream but is currently turned off.
- */
-export const MODEL_MAP: Record<string, ModelInfo> = {
-  // OpenAI
-  "gpt-5.4-nano": { id: "openai/gpt-5.4-nano", disabled: false, contextWindow: 400_000 },
-  "gpt-5.4-mini": { id: "openai/gpt-5.4-mini", disabled: false, contextWindow: 400_000 },
-  // Google
-  "gemini-3.1-flash-lite": { id: "google-ai-studio/gemini-3.1-flash-lite-preview", disabled: false, contextWindow: 1_000_000 },
-  // xAI
-  "grok-4.1-fast": { id: "grok/grok-4-1-fast", disabled: false, contextWindow: 131_072 },
-  "grok-3-mini": { id: "grok/grok-3-mini", disabled: false, contextWindow: 131_072 },
-  // Groq
-  "llama-4-scout-17b": { id: "groq/meta-llama/llama-4-scout-17b-16e-instruct", disabled: false, contextWindow: 131_072 },
-  "qwen3-32b": { id: "groq/qwen/qwen3-32b", disabled: false, contextWindow: 131_072 },
-};
+/** Upstream's own model list (single source of truth for the assistant-ui docs chat). */
+const MODELS_SOURCE_URL =
+  "https://raw.githubusercontent.com/assistant-ui/assistant-ui/main/apps/docs/constants/model.ts";
 
-export const DEFAULT_MODEL = "gpt-5.4-nano";
+/** Snapshot used when the source fetch fails. Refresh occasionally. */
+const FALLBACK_SOURCE = `
+  { value: "gpt-5.6-luna", disabled: false, contextWindow: 1_050_000 },
+  { value: "google-ai-studio/gemini-3.1-flash-lite", disabled: false, contextWindow: 1_048_576 },
+  { value: "grok/grok-4-1-fast", disabled: false, contextWindow: 2_000_000 },
+  { value: "deepseek/deepseek-v4-flash", disabled: false, contextWindow: 1_000_000 },
+  { value: "groq/openai/gpt-oss-20b", disabled: false, contextWindow: 131_072 },
+  { value: "groq/openai/gpt-oss-120b", disabled: false, contextWindow: 131_072 },
+`;
 
-/** Only non-disabled models. */
-export const ACTIVE_MODELS: Record<string, string> = Object.fromEntries(
-  Object.entries(MODEL_MAP)
-    .filter(([, v]) => !v.disabled)
-    .map(([k, v]) => [k, v.id]),
-);
+const MODEL_RE =
+  /value:\s*"([^"]+)"[\s\S]{0,200}?disabled:\s*(true|false)[\s\S]{0,80}?contextWindow:\s*([\d_]+)/g;
+
+/** "groq/openai/gpt-oss-20b" -> "gpt-oss-20b" */
+function shortName(id: string): string {
+  return id.split("/").pop()!;
+}
+
+export function parseCatalog(source: string): ModelCatalog {
+  const map: Record<string, ModelInfo> = {};
+  let defaultModel = "";
+  for (const m of source.matchAll(MODEL_RE)) {
+    const [, id, disabled, ctx] = m;
+    const info = {
+      id,
+      disabled: disabled === "true",
+      contextWindow: Number(ctx.replace(/_/g, "")),
+    };
+    map[shortName(id)] = info;
+    if (!defaultModel && !info.disabled) defaultModel = shortName(id);
+  }
+  return { map, defaultModel };
+}
+
+const FALLBACK_CATALOG = parseCatalog(FALLBACK_SOURCE);
+const TTL_MS = 60 * 60 * 1000;
+
+let cached: ModelCatalog = FALLBACK_CATALOG;
+let cachedAt = 0;
+
+/** Fetch the live model list; falls back to the last good value (then the snapshot). */
+export async function getCatalog(): Promise<ModelCatalog> {
+  if (Date.now() - cachedAt < TTL_MS) return cached;
+  try {
+    const resp = await fetch(MODELS_SOURCE_URL, { cf: { cacheTtl: 3600 } } as RequestInit);
+    if (resp.ok) {
+      const catalog = parseCatalog(await resp.text());
+      if (catalog.defaultModel) {
+        cached = catalog;
+        cachedAt = Date.now();
+      }
+    }
+  } catch {
+    // keep whatever we have
+  }
+  return cached;
+}
 
 export const UPSTREAM_HEADERS: Record<string, string> = {
   "content-type": "application/json",

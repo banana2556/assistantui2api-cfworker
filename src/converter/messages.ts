@@ -3,7 +3,7 @@
  * Ported from Python api/converter/messages.py
  */
 
-import { ACTIVE_MODELS, DEFAULT_MODEL, MAX_SYSTEM_LENGTH, MODEL_MAP } from "../config";
+import { MAX_SYSTEM_LENGTH, type ModelCatalog } from "../config";
 
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -15,10 +15,10 @@ export function genId(prefix: string = "msg", size: number = 12): string {
 }
 
 /** Map short model name to assistant-ui API identifier. */
-function resolveModel(model: string): string {
-  if (model in MODEL_MAP) {
-    const info = MODEL_MAP[model];
-    if (info.disabled) return ACTIVE_MODELS[DEFAULT_MODEL];
+function resolveModel(model: string, catalog: ModelCatalog): string {
+  const info = catalog.map[model];
+  if (info) {
+    if (info.disabled) return catalog.map[catalog.defaultModel].id;
     return info.id;
   }
   if (model.includes("/")) return model;
@@ -74,6 +74,7 @@ function convertTools(tools: any[] | null | undefined): Record<string, any> {
 export function openaiToAiSdk(
   messages: any[],
   model: string,
+  catalog: ModelCatalog,
   tools?: any[] | null,
 ): Record<string, any> {
   const sdkMessages: any[] = [];
@@ -183,7 +184,7 @@ export function openaiToAiSdk(
 
   return {
     system: systemText,
-    config: { modelName: resolveModel(model) },
+    config: { modelName: resolveModel(model, catalog) },
     tools: convertTools(tools),
     id: genId("thread"),
     messages: sdkMessages,
