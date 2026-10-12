@@ -7,7 +7,7 @@
  * Ported from: https://github.com/XXXxx7258/assistant-2api (Python/FastAPI)
  */
 
-import { type Env, DOCS_SUFFIX, getCatalog } from "./config";
+import { type Env, DOCS_SUFFIX, ENDPOINT_LIMITS, getCatalog } from "./config";
 import { openaiToAiSdk, genId } from "./converter/messages";
 import {
   convertStreamToOpenAI,
@@ -84,13 +84,28 @@ async function handleModels(all: boolean): Promise<Response> {
   const data = Object.entries(map)
     .filter(([, info]) => all || !info.disabled)
     .flatMap(([shortName, info]) =>
-      ["", DOCS_SUFFIX].map((suffix) => ({
-        id: shortName + suffix,
-        object: "model",
-        created: now,
-        owned_by: info.id.includes("/") ? info.id.split("/")[0] : "openai",
-        ...(all ? { disabled: info.disabled, context_window: info.contextWindow } : {}),
-      })),
+      ["", DOCS_SUFFIX].map((suffix) => {
+        const limits = suffix ? ENDPOINT_LIMITS.docs : ENDPOINT_LIMITS.chat;
+        const boosted = info.reasoning && limits.maxOutputTokensReasoning > limits.maxOutputTokens;
+        return {
+          id: shortName + suffix,
+          object: "model",
+          created: now,
+          owned_by: info.id.includes("/") ? info.id.split("/")[0] : "openai",
+          ...(all
+            ? {
+                disabled: info.disabled,
+                // Upstream rejects input above this many serialized message chars (not tokens)
+                context_window: limits.maxInputChars,
+                max_message_chars: limits.maxMessageChars,
+                max_messages: limits.maxMessages,
+                max_output_tokens: boosted ? limits.maxOutputTokensReasoning : limits.maxOutputTokens,
+                ...(boosted ? { max_output_tokens_note: "needs reasoning_effort" } : {}),
+                model_context_window: info.contextWindow,
+              }
+            : {}),
+        };
+      }),
     );
   return jsonResponse({ object: "list", data });
 }
@@ -122,6 +137,8 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
   let payload: Record<string, any>;
   try {
     payload = openaiToAiSdk(body.messages || [], upstreamModel, catalog, tools);
+    // Upstream caps effort at "medium"; on /api/chat it also lifts the output cap to 16k for reasoning models
+    if (body.reasoning_effort) payload.config.reasoningEffort = body.reasoning_effort;
   } catch (e: any) {
     return errorResponse(`Invalid request: ${e.message}`, "invalid_request_error");
   }

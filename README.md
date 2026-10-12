@@ -55,6 +55,24 @@ Every model is exposed under two names, one per upstream endpoint:
 Both endpoints also carry upstream's own built-in tools; only calls to tools
 *you* declared in `tools` are returned as `tool_calls`.
 
+### Limits
+
+Upstream enforces these (verified by probing; over-limit requests return 400).
+Input sizes are characters of the JSON-serialized messages, not tokens — the
+models' own ~1M-token windows are never reached.
+
+| | `name` (`/api/chat`) | `name-docs` (`/api/doc/chat`) |
+|---|---|---|
+| Total input | 96,000 chars | 480,000 chars |
+| Single message | 12,000 chars | 24,000 chars |
+| Messages | 20 | unlimited |
+| System prompt | 4,000 chars | 4,000 chars |
+| Output | 4,096 tokens (16,384 for `gpt-6-luna` with `reasoning_effort`) | 8,192 tokens |
+
+`reasoning_effort` (`none`…`xhigh`, capped at `medium` upstream) is passed through;
+only reasoning models (`gpt-6-luna`) use it. `GET /v1/models/all` reports these
+limits per model name.
+
 Use `GET /v1/models` for the live list. `node test-models.mjs` verifies the
 upstream list still parses.
 

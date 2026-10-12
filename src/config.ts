@@ -12,7 +12,10 @@ export interface ModelInfo {
   /** assistant-ui API identifier, e.g. "groq/openai/gpt-oss-20b" */
   id: string;
   disabled: boolean;
+  /** Model's own context window in tokens (upstream's input checks are far tighter, see ENDPOINT_LIMITS). */
   contextWindow: number;
+  /** Accepts reasoningEffort upstream (raises /api/chat output cap). */
+  reasoning: boolean;
 }
 
 export interface ModelCatalog {
@@ -25,6 +28,15 @@ export interface ModelCatalog {
 /** Model-name suffix that routes to the docs assistant (/api/doc/chat) instead of /api/chat. */
 export const DOCS_SUFFIX = "-docs";
 
+/**
+ * Upstream limits, verified by probing on 2026-10-12. Input sizes are characters of the
+ * JSON-serialized messages (not tokens); exceeding one returns 400.
+ */
+export const ENDPOINT_LIMITS = {
+  chat: { maxInputChars: 96_000, maxMessageChars: 12_000, maxMessages: 20, maxOutputTokens: 4096, maxOutputTokensReasoning: 16_384 },
+  docs: { maxInputChars: 480_000, maxMessageChars: 24_000, maxMessages: null, maxOutputTokens: 8192, maxOutputTokensReasoning: 8192 },
+};
+
 /** Maximum length for system prompts (matches upstream validation). */
 export const MAX_SYSTEM_LENGTH = 4000;
 
@@ -34,7 +46,7 @@ const MODELS_SOURCE_URL =
 
 /** Snapshot used when the source fetch fails. Refresh occasionally. */
 const FALLBACK_SOURCE = `
-  { value: "gpt-6-luna", disabled: false, contextWindow: 1_050_000 },
+  { value: "gpt-6-luna", disabled: false, contextWindow: 1_050_000, reasoning: true },
   { value: "google-ai-studio/gemini-3.5-flash-lite", disabled: false, contextWindow: 1_048_576 },
   { value: "grok/grok-4.3", disabled: false, contextWindow: 1_000_000 },
   { value: "deepseek/deepseek-flash", disabled: false, contextWindow: 1_048_576 },
@@ -46,7 +58,7 @@ const FALLBACK_SOURCE = `
 const REMOVED_MODELS = new Set(["gemini-3.5-flash-lite", "deepseek-flash", "gpt-oss-20b", "gpt-oss-120b"]);
 
 const MODEL_RE =
-  /value:\s*"([^"]+)"[\s\S]{0,200}?disabled:\s*(true|false)[\s\S]{0,80}?contextWindow:\s*([\d_]+)/g;
+  /value:\s*"([^"]+)"[\s\S]{0,200}?disabled:\s*(true|false)[\s\S]{0,80}?contextWindow:\s*([\d_]+)(?:,\s*reasoning:\s*(true))?/g;
 
 /** "groq/openai/gpt-oss-20b" -> "gpt-oss-20b" */
 function shortName(id: string): string {
@@ -57,12 +69,13 @@ export function parseCatalog(source: string): ModelCatalog {
   const map: Record<string, ModelInfo> = {};
   let defaultModel = "";
   for (const m of source.matchAll(MODEL_RE)) {
-    const [, id, disabled, ctx] = m;
+    const [, id, disabled, ctx, reasoning] = m;
     if (REMOVED_MODELS.has(shortName(id))) continue;
     const info = {
       id,
       disabled: disabled === "true",
       contextWindow: Number(ctx.replace(/_/g, "")),
+      reasoning: reasoning === "true",
     };
     map[shortName(id)] = info;
     if (!defaultModel && !info.disabled) defaultModel = shortName(id);
