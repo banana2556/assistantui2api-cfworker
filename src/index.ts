@@ -7,12 +7,11 @@
  * Ported from: https://github.com/XXXxx7258/assistant-2api (Python/FastAPI)
  */
 
-import { type Env, DOCS_SUFFIX, getCatalog, isModelFailing, markModelFailed } from "./config";
+import { type Env, DOCS_SUFFIX, getCatalog } from "./config";
 import { openaiToAiSdk, genId } from "./converter/messages";
 import {
   convertStreamToOpenAI,
   parseFullResponse,
-  ModelError,
   buildNonStreamResponse,
 } from "./converter/stream";
 import { callUpstreamStream, callUpstreamFull, UpstreamError } from "./provider";
@@ -83,16 +82,14 @@ async function handleModels(all: boolean): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
   const { map } = await getCatalog();
   const data = Object.entries(map)
-    .filter(([shortName, info]) => all || (!info.disabled && !isModelFailing(shortName)))
+    .filter(([, info]) => all || !info.disabled)
     .flatMap(([shortName, info]) =>
       ["", DOCS_SUFFIX].map((suffix) => ({
         id: shortName + suffix,
         object: "model",
         created: now,
         owned_by: info.id.includes("/") ? info.id.split("/")[0] : "openai",
-        ...(all
-          ? { disabled: info.disabled, failing: isModelFailing(shortName), context_window: info.contextWindow }
-          : {}),
+        ...(all ? { disabled: info.disabled, context_window: info.contextWindow } : {}),
       })),
     );
   return jsonResponse({ object: "list", data });
@@ -137,9 +134,7 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
       if (!upstreamResp.body) {
         return errorResponse("No response body from upstream", "upstream_error", 502);
       }
-      const openaiStream = convertStreamToOpenAI(upstreamResp.body, model, requestId, clientTools, () =>
-        markModelFailed(upstreamModel),
-      );
+      const openaiStream = convertStreamToOpenAI(upstreamResp.body, model, requestId, clientTools);
       return new Response(openaiStream, {
         headers: {
           "Content-Type": "text/event-stream",
@@ -175,7 +170,6 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
     if (e instanceof UpstreamError) {
       return errorResponse(e.message, "upstream_error", e.statusCode);
     }
-    if (e instanceof ModelError) markModelFailed(upstreamModel);
     return errorResponse(`Upstream error: ${e.message}`, "upstream_error", 502);
   }
 }

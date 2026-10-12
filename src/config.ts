@@ -42,6 +42,9 @@ const FALLBACK_SOURCE = `
   { value: "groq/openai/gpt-oss-120b", disabled: false, contextWindow: 131_072 },
 `;
 
+/** Listed upstream but always fail there ("An error occurred."); drop them from the catalog. */
+const REMOVED_MODELS = new Set(["gemini-3.5-flash-lite", "deepseek-flash", "gpt-oss-20b", "gpt-oss-120b"]);
+
 const MODEL_RE =
   /value:\s*"([^"]+)"[\s\S]{0,200}?disabled:\s*(true|false)[\s\S]{0,80}?contextWindow:\s*([\d_]+)/g;
 
@@ -55,6 +58,7 @@ export function parseCatalog(source: string): ModelCatalog {
   let defaultModel = "";
   for (const m of source.matchAll(MODEL_RE)) {
     const [, id, disabled, ctx] = m;
+    if (REMOVED_MODELS.has(shortName(id))) continue;
     const info = {
       id,
       disabled: disabled === "true",
@@ -91,19 +95,6 @@ export async function getCatalog(): Promise<ModelCatalog> {
 }
 
 /** Upstream only serves requests that look like same-origin browser fetches. */
-/** short name -> when upstream last returned an error event for it. */
-const failedAt: Record<string, number> = {};
-
-// ponytail: per-isolate memory, so each isolate needs its own first failure; move to KV if that matters.
-export function markModelFailed(shortName: string): void {
-  failedAt[shortName] = Date.now();
-}
-
-/** Models that errored within the last hour are hidden from /v1/models (requests still go through, so they can recover). */
-export function isModelFailing(shortName: string): boolean {
-  return Date.now() - (failedAt[shortName] ?? 0) < TTL_MS;
-}
-
 export const UPSTREAM_HEADERS: Record<string, string> = {
   "content-type": "application/json",
   "user-agent":

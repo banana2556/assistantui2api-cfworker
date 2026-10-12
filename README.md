@@ -35,16 +35,15 @@ and cached for 1 hour (a snapshot in `src/config.ts` is used if that fetch fails
 Model names are the last path segment of the upstream id, and the first active
 model is the default.
 
+Models that upstream lists but that always fail there are dropped
+(`REMOVED_MODELS` in `src/config.ts`: Gemini, DeepSeek and both GPT-OSS).
+
 As of writing:
 
 | Model | Provider |
 |---|---|
 | `gpt-6-luna` (default) | OpenAI |
-| `gemini-3.5-flash-lite` | Google |
 | `grok-4.3` | xAI |
-| `deepseek-flash` | DeepSeek |
-| `gpt-oss-20b` | Groq |
-| `gpt-oss-120b` | Groq |
 
 Every model is exposed under two names, one per upstream endpoint:
 
@@ -55,10 +54,6 @@ Every model is exposed under two names, one per upstream endpoint:
 
 Both endpoints also carry upstream's own built-in tools; only calls to tools
 *you* declared in `tools` are returned as `tool_calls`.
-
-A model that returns an upstream error is hidden from `GET /v1/models` for an hour
-(requests to it still go through, so it reappears once upstream fixes it);
-`GET /v1/models/all` shows it with `"failing": true`.
 
 Use `GET /v1/models` for the live list. `node test-models.mjs` verifies the
 upstream list still parses.
