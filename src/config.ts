@@ -2,6 +2,7 @@
 
 export interface Env {
   API_KEY: string;
+  /** Upstream origin (any path is ignored). */
   UPSTREAM_URL: string;
   /** Optional proxy URL — route upstream requests through your own VPS to avoid shared CF egress IP rate limits. */
   PROXY_URL: string;
@@ -20,6 +21,9 @@ export interface ModelCatalog {
   /** short name of the first active model */
   defaultModel: string;
 }
+
+/** Model-name suffix that routes to the docs assistant (/api/doc/chat) instead of /api/chat. */
+export const DOCS_SUFFIX = "-docs";
 
 /** Maximum length for system prompts (matches upstream validation). */
 export const MAX_SYSTEM_LENGTH = 4000;

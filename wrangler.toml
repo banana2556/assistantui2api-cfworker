@@ -3,7 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2024-05-12"
 
 [vars]
-UPSTREAM_URL = "https://www.assistant-ui.com/api/doc/chat"
+# Only the origin is used; /api/chat or /api/doc/chat is picked per model
+UPSTREAM_URL = "https://www.assistant-ui.com"
 # Optional: route through your own proxy to avoid CF shared IP rate limits
 # PROXY_URL = "https://your-vps.example.com/proxy"
 PROXY_URL = ""

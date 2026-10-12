@@ -7,7 +7,7 @@
  * Ported from: https://github.com/XXXxx7258/assistant-2api (Python/FastAPI)
  */
 
-import { type Env, getCatalog } from "./config";
+import { type Env, DOCS_SUFFIX, getCatalog } from "./config";
 import { openaiToAiSdk, genId } from "./converter/messages";
 import {
   convertStreamToOpenAI,
@@ -73,19 +73,25 @@ function handleHealth(): Response {
   return jsonResponse({ status: "ok" });
 }
 
-/** GET /v1/models — active models (GET /v1/models/all includes disabled ones) */
+/**
+ * GET /v1/models — active models (GET /v1/models/all includes disabled ones).
+ * Each model is listed twice: `name` -> /api/chat (your system prompt),
+ * `name-docs` -> /api/doc/chat (upstream's docs assistant).
+ */
 async function handleModels(all: boolean): Promise<Response> {
   const now = Math.floor(Date.now() / 1000);
   const { map } = await getCatalog();
   const data = Object.entries(map)
     .filter(([, info]) => all || !info.disabled)
-    .map(([shortName, info]) => ({
-      id: shortName,
-      object: "model",
-      created: now,
-      owned_by: info.id.includes("/") ? info.id.split("/")[0] : "openai",
-      ...(all ? { disabled: info.disabled, context_window: info.contextWindow } : {}),
-    }));
+    .flatMap(([shortName, info]) =>
+      ["", DOCS_SUFFIX].map((suffix) => ({
+        id: shortName + suffix,
+        object: "model",
+        created: now,
+        owned_by: info.id.includes("/") ? info.id.split("/")[0] : "openai",
+        ...(all ? { disabled: info.disabled, context_window: info.contextWindow } : {}),
+      })),
+    );
   return jsonResponse({ object: "list", data });
 }
 
@@ -101,18 +107,24 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
   const catalog = await getCatalog();
   const requestId = `chatcmpl-${genId("", 24)}`;
   const model = body.model || catalog.defaultModel;
+  const docs = model.endsWith(DOCS_SUFFIX);
+  const upstreamModel = docs ? model.slice(0, -DOCS_SUFFIX.length) : model;
   const stream = body.stream === true;
   const tools = body.tools || null;
+  // Upstream injects its own tools on both endpoints; only forward calls to tools the client declared.
+  const clientTools = new Set<string>((tools || []).map((t: any) => t?.function?.name));
 
   // Convert OpenAI format to AI SDK v6 format
   let payload: Record<string, any>;
   try {
-    payload = openaiToAiSdk(body.messages || [], model, catalog, tools);
+    payload = openaiToAiSdk(body.messages || [], upstreamModel, catalog, tools);
   } catch (e: any) {
     return errorResponse(`Invalid request: ${e.message}`, "invalid_request_error");
   }
 
-  const upstreamUrl = env.UPSTREAM_URL || "https://www.assistant-ui.com/api/doc/chat";
+  // Only the origin of UPSTREAM_URL is used; the path is picked per model.
+  const origin = new URL(env.UPSTREAM_URL || "https://www.assistant-ui.com").origin;
+  const upstreamUrl = origin + (docs ? "/api/doc/chat" : "/api/chat");
   const proxyUrl = env.PROXY_URL || undefined;
 
   if (stream) {
@@ -122,7 +134,7 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
       if (!upstreamResp.body) {
         return errorResponse("No response body from upstream", "upstream_error", 502);
       }
-      const openaiStream = convertStreamToOpenAI(upstreamResp.body, model, requestId);
+      const openaiStream = convertStreamToOpenAI(upstreamResp.body, model, requestId, clientTools);
       return new Response(openaiStream, {
         headers: {
           "Content-Type": "text/event-stream",
@@ -143,7 +155,7 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
   // Non-streaming mode
   try {
     const fullBody = await callUpstreamFull(payload, upstreamUrl, proxyUrl);
-    const parsed = parseFullResponse(fullBody);
+    const parsed = parseFullResponse(fullBody, clientTools);
     return jsonResponse(
       buildNonStreamResponse(
         requestId,

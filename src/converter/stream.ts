@@ -44,12 +44,6 @@ function extractUsage(event: any): Record<string, number> | null {
   };
 }
 
-/**
- * Tools upstream executes itself (docs/repo lookup). Their calls never reach
- * the client, so they must not be forwarded as OpenAI tool_calls.
- */
-const SERVER_TOOLS = new Set(["listDocs", "readDoc", "bash", "readFile"]);
-
 /* ------------------------------------------------------------------ */
 /*  Streaming conversion                                              */
 /* ------------------------------------------------------------------ */
@@ -62,6 +56,8 @@ export function convertStreamToOpenAI(
   upstream: ReadableStream<Uint8Array>,
   model: string,
   requestId: string,
+  /** Only these tool calls are forwarded; upstream's own tools are dropped. */
+  clientTools: Set<string>,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -128,7 +124,7 @@ export function convertStreamToOpenAI(
             else if (eventType === "tool-input-start") {
               const tcId = event.toolCallId || "";
               const toolName = event.toolName || "";
-              if (SERVER_TOOLS.has(toolName)) continue;
+              if (!clientTools.has(toolName)) continue;
               const idx = nextToolIndex++;
               toolCallsIndex[tcId] = idx;
 
@@ -148,7 +144,7 @@ export function convertStreamToOpenAI(
             } else if (eventType === "tool-input-delta") {
               const tcId = event.toolCallId || "";
               const idx = toolCallsIndex[tcId];
-              if (idx === undefined) continue; // server tool
+              if (idx === undefined) continue; // upstream's own tool
               controller.enqueue(
                 encoder.encode(
                   makeChunk(requestId, model, {
@@ -168,7 +164,7 @@ export function convertStreamToOpenAI(
             // --- Finish events ---
             else if (eventType === "finish") {
               let finishReason = event.finishReason || "stop";
-              if (finishReason === "tool-calls") finishReason = "tool_calls";
+              if (finishReason === "tool-calls") finishReason = nextToolIndex ? "tool_calls" : "stop";
               const usage = extractUsage(event);
               controller.enqueue(
                 encoder.encode(makeChunk(requestId, model, {}, finishReason, usage)),
@@ -185,7 +181,7 @@ export function convertStreamToOpenAI(
               const event = JSON.parse(line.slice(6));
               if (event.type === "finish") {
                 let finishReason = event.finishReason || "stop";
-                if (finishReason === "tool-calls") finishReason = "tool_calls";
+                if (finishReason === "tool-calls") finishReason = nextToolIndex ? "tool_calls" : "stop";
                 const usage = extractUsage(event);
                 controller.enqueue(
                   encoder.encode(makeChunk(requestId, model, {}, finishReason, usage)),
@@ -224,7 +220,7 @@ export interface ParsedResponse {
 }
 
 /** Parse all SSE lines from a full response body into structured data. */
-export function parseFullResponse(body: string): ParsedResponse {
+export function parseFullResponse(body: string, clientTools: Set<string>): ParsedResponse {
   const contentParts: string[] = [];
   const toolCalls: any[] = [];
   const toolArgs: Record<string, string[]> = {};
@@ -248,14 +244,14 @@ export function parseFullResponse(body: string): ParsedResponse {
     if (etype === "text-delta") {
       contentParts.push(event.delta || "");
     } else if (etype === "tool-input-start") {
-      if (SERVER_TOOLS.has(event.toolName)) continue;
+      if (!clientTools.has(event.toolName)) continue;
       const tcId = event.toolCallId || "";
       toolArgs[tcId] = [];
       toolMeta[tcId] = { name: event.toolName || "", id: tcId };
     } else if (etype === "tool-input-delta") {
       toolArgs[event.toolCallId || ""]?.push(event.inputTextDelta || "");
     } else if (etype === "tool-input-available") {
-      if (SERVER_TOOLS.has(event.toolName)) continue;
+      if (!clientTools.has(event.toolName)) continue;
       const tcId = event.toolCallId || "";
       const meta = toolMeta[tcId] || { name: event.toolName || "", id: tcId };
       toolCalls.push({
@@ -288,6 +284,9 @@ export function parseFullResponse(body: string): ParsedResponse {
       });
     }
   }
+
+  // Upstream stopped on one of its own (dropped) tools
+  if (finishReason === "tool_calls" && toolCalls.length === 0) finishReason = "stop";
 
   return {
     content: contentParts.join(""),

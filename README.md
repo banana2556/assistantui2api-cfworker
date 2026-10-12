@@ -30,7 +30,7 @@ npx wrangler secret put API_KEY
 ## Available Models
 
 The model list is **not hardcoded** — it is fetched at runtime from upstream's own
-[`constants/model.ts`](https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/lib/model.ts)
+[`lib/model.ts`](https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/lib/model.ts)
 and cached for 1 hour (a snapshot in `src/config.ts` is used if that fetch fails).
 Model names are the last path segment of the upstream id, and the first active
 model is the default.
@@ -45,6 +45,16 @@ As of writing:
 | `deepseek-flash` | DeepSeek |
 | `gpt-oss-20b` | Groq |
 | `gpt-oss-120b` | Groq |
+
+Every model is exposed under two names, one per upstream endpoint:
+
+| Name | Upstream | Behaviour |
+|---|---|---|
+| `gpt-6-luna` | `/api/chat` | General chat — your `system` prompt is used as-is. |
+| `gpt-6-luna-docs` | `/api/doc/chat` | assistant-ui docs assistant — upstream's fixed prompt, your `system` is appended as page context; it can read the docs/source itself. |
+
+Both endpoints also carry upstream's own built-in tools; only calls to tools
+*you* declared in `tools` are returned as `tool_calls`.
 
 Use `GET /v1/models` for the live list. `node test-models.mjs` verifies the
 upstream list still parses.
@@ -133,7 +143,7 @@ API_KEY=test-key
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `API_KEY` | No | _(empty = open access)_ | Bearer token. **Set via `wrangler secret put`**, not in `wrangler.toml`. |
-| `UPSTREAM_URL` | No | `https://www.assistant-ui.com/api/doc/chat` | Upstream chat endpoint. |
+| `UPSTREAM_URL` | No | `https://www.assistant-ui.com` | Upstream origin (path ignored; picked per model). |
 | `PROXY_URL` | No | _(empty)_ | Reverse-proxy URL for IP rotation (see below). |
 
 ### Proxy Mode
