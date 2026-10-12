@@ -56,6 +56,10 @@ Every model is exposed under two names, one per upstream endpoint:
 Both endpoints also carry upstream's own built-in tools; only calls to tools
 *you* declared in `tools` are returned as `tool_calls`.
 
+A model that returns an upstream error is hidden from `GET /v1/models` for an hour
+(requests to it still go through, so it reappears once upstream fixes it);
+`GET /v1/models/all` shows it with `"failing": true`.
+
 Use `GET /v1/models` for the live list. `node test-models.mjs` verifies the
 upstream list still parses.
 

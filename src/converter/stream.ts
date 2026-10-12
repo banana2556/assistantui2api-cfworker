@@ -44,6 +44,9 @@ function extractUsage(event: any): Record<string, number> | null {
   };
 }
 
+/** Upstream sent an `error` event: the model itself failed (not transport/HTTP). */
+export class ModelError extends Error {}
+
 /* ------------------------------------------------------------------ */
 /*  Streaming conversion                                              */
 /* ------------------------------------------------------------------ */
@@ -58,6 +61,7 @@ export function convertStreamToOpenAI(
   requestId: string,
   /** Only these tool calls are forwarded; upstream's own tools are dropped. */
   clientTools: Set<string>,
+  onModelError: () => void,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -158,7 +162,7 @@ export function convertStreamToOpenAI(
             }
 
             else if (eventType === "error") {
-              throw new Error(event.errorText || "Upstream error");
+              throw new ModelError(event.errorText || "Upstream error");
             }
 
             // --- Finish events ---
@@ -194,6 +198,7 @@ export function convertStreamToOpenAI(
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
       } catch (err) {
+        if (err instanceof ModelError) onModelError();
         const errorChunk = {
           id: requestId,
           object: "chat.completion.chunk",
@@ -263,7 +268,7 @@ export function parseFullResponse(body: string, clientTools: Set<string>): Parse
         },
       });
     } else if (etype === "error") {
-      throw new Error(event.errorText || "Upstream error");
+      throw new ModelError(event.errorText || "Upstream error");
     } else if (etype === "finish") {
       finishReason = event.finishReason || "stop";
       if (finishReason === "tool-calls") finishReason = "tool_calls";

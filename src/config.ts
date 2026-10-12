@@ -91,6 +91,19 @@ export async function getCatalog(): Promise<ModelCatalog> {
 }
 
 /** Upstream only serves requests that look like same-origin browser fetches. */
+/** short name -> when upstream last returned an error event for it. */
+const failedAt: Record<string, number> = {};
+
+// ponytail: per-isolate memory, so each isolate needs its own first failure; move to KV if that matters.
+export function markModelFailed(shortName: string): void {
+  failedAt[shortName] = Date.now();
+}
+
+/** Models that errored within the last hour are hidden from /v1/models (requests still go through, so they can recover). */
+export function isModelFailing(shortName: string): boolean {
+  return Date.now() - (failedAt[shortName] ?? 0) < TTL_MS;
+}
+
 export const UPSTREAM_HEADERS: Record<string, string> = {
   "content-type": "application/json",
   "user-agent":
