@@ -109,6 +109,10 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
   const model = body.model || catalog.defaultModel;
   const docs = model.endsWith(DOCS_SUFFIX);
   const upstreamModel = docs ? model.slice(0, -DOCS_SUFFIX.length) : model;
+  const info = catalog.map[upstreamModel];
+  if (!info || info.disabled) {
+    return errorResponse(`The model \`${model}\` does not exist`, "invalid_request_error", 404);
+  }
   const stream = body.stream === true;
   const tools = body.tools || null;
   // Upstream injects its own tools on both endpoints; only forward calls to tools the client declared.

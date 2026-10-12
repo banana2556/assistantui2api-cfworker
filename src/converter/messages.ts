@@ -14,17 +14,6 @@ export function genId(prefix: string = "msg", size: number = 12): string {
   return `${prefix}_${id}`;
 }
 
-/** Map short model name to assistant-ui API identifier. */
-function resolveModel(model: string, catalog: ModelCatalog): string {
-  const info = catalog.map[model];
-  if (info) {
-    if (info.disabled) return catalog.map[catalog.defaultModel].id;
-    return info.id;
-  }
-  if (model.includes("/")) return model;
-  return `openai/${model}`;
-}
-
 /** Infer media type from a data-URI or file extension. */
 function guessMediaType(url: string): string {
   if (url.startsWith("data:")) {
@@ -184,7 +173,7 @@ export function openaiToAiSdk(
 
   return {
     system: systemText,
-    config: { modelName: resolveModel(model, catalog) },
+    config: { modelName: catalog.map[model].id }, // caller validated model
     tools: convertTools(tools),
     id: genId("thread"),
     messages: sdkMessages,
