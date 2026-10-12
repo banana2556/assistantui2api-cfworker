@@ -10,7 +10,7 @@
  *   PROXY_URL = "http://your-vps-ip:3100/proxy"
  *
  * How it works:
- *   CF Worker POSTs to this proxy with header X-Target-URL = real upstream.
+ *   CF Worker sends GET/POST to this proxy with header X-Target-URL = real upstream.
  *   Proxy forwards the request body/headers to X-Target-URL and streams back.
  */
 
@@ -23,8 +23,8 @@ const PROXY_SECRET = process.env.PROXY_SECRET || ""; // optional auth
 const server = http.createServer(async (req, res) => {
   // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Target-URL, X-Proxy-Secret");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Target-URL, X-Proxy-Secret, X-Assistant-UI-Anonymous-Session");
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -32,7 +32,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method !== "POST" || req.url !== "/proxy") {
+  if (!["GET", "POST"].includes(req.method) || req.url !== "/proxy") {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not found" }));
     return;
@@ -65,13 +65,17 @@ const server = http.createServer(async (req, res) => {
     "content-type": req.headers["content-type"] || "application/json",
     "user-agent": req.headers["user-agent"] || "ai-sdk/6.1.0 runtime/browser",
     "origin": req.headers["origin"] || "https://www.assistant-ui.com",
-    "referer": req.headers["referer"] || "https://www.assistant-ui.com/docs",
+    "referer": req.headers["referer"] || "https://www.assistant-ui.com/",
   };
+  // Upstream requires browser fetch metadata + the anonymous session token
+  for (const h of ["sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "x-assistant-ui-anonymous-session"]) {
+    if (req.headers[h]) forwardHeaders[h] = req.headers[h];
+  }
 
   const proxyReq = mod.request(
     targetUrl,
     {
-      method: "POST",
+      method: req.method,
       headers: { ...forwardHeaders, "content-length": body.length },
     },
     (proxyRes) => {

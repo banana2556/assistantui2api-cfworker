@@ -29,8 +29,8 @@ function makeChunk(
  * Extract usage from a finish event.
  *
  * Upstream formats (checked in priority order):
- *  1. messageMetadata.usage       (current /api/chat)
- *  2. messageMetadata.custom.usage (legacy /api/doc/chat)
+ *  1. messageMetadata.usage        (legacy /api/chat)
+ *  2. messageMetadata.custom.usage (current /api/doc/chat)
  */
 function extractUsage(event: any): Record<string, number> | null {
   const meta = event.messageMetadata || {};
@@ -43,6 +43,12 @@ function extractUsage(event: any): Record<string, number> | null {
     total_tokens: raw.totalTokens ?? 0,
   };
 }
+
+/**
+ * Tools upstream executes itself (docs/repo lookup). Their calls never reach
+ * the client, so they must not be forwarded as OpenAI tool_calls.
+ */
+const SERVER_TOOLS = new Set(["listDocs", "readDoc", "bash", "readFile"]);
 
 /* ------------------------------------------------------------------ */
 /*  Streaming conversion                                              */
@@ -122,6 +128,7 @@ export function convertStreamToOpenAI(
             else if (eventType === "tool-input-start") {
               const tcId = event.toolCallId || "";
               const toolName = event.toolName || "";
+              if (SERVER_TOOLS.has(toolName)) continue;
               const idx = nextToolIndex++;
               toolCallsIndex[tcId] = idx;
 
@@ -140,7 +147,8 @@ export function convertStreamToOpenAI(
               controller.enqueue(encoder.encode(makeChunk(requestId, model, delta)));
             } else if (eventType === "tool-input-delta") {
               const tcId = event.toolCallId || "";
-              const idx = toolCallsIndex[tcId] ?? 0;
+              const idx = toolCallsIndex[tcId];
+              if (idx === undefined) continue; // server tool
               controller.enqueue(
                 encoder.encode(
                   makeChunk(requestId, model, {
@@ -151,6 +159,10 @@ export function convertStreamToOpenAI(
                   }),
                 ),
               );
+            }
+
+            else if (eventType === "error") {
+              throw new Error(event.errorText || "Upstream error");
             }
 
             // --- Finish events ---
@@ -236,14 +248,14 @@ export function parseFullResponse(body: string): ParsedResponse {
     if (etype === "text-delta") {
       contentParts.push(event.delta || "");
     } else if (etype === "tool-input-start") {
+      if (SERVER_TOOLS.has(event.toolName)) continue;
       const tcId = event.toolCallId || "";
       toolArgs[tcId] = [];
       toolMeta[tcId] = { name: event.toolName || "", id: tcId };
     } else if (etype === "tool-input-delta") {
-      const tcId = event.toolCallId || "";
-      if (!toolArgs[tcId]) toolArgs[tcId] = [];
-      toolArgs[tcId].push(event.inputTextDelta || "");
+      toolArgs[event.toolCallId || ""]?.push(event.inputTextDelta || "");
     } else if (etype === "tool-input-available") {
+      if (SERVER_TOOLS.has(event.toolName)) continue;
       const tcId = event.toolCallId || "";
       const meta = toolMeta[tcId] || { name: event.toolName || "", id: tcId };
       toolCalls.push({
@@ -254,6 +266,8 @@ export function parseFullResponse(body: string): ParsedResponse {
           arguments: JSON.stringify(event.input || {}),
         },
       });
+    } else if (etype === "error") {
+      throw new Error(event.errorText || "Upstream error");
     } else if (etype === "finish") {
       finishReason = event.finishReason || "stop";
       if (finishReason === "tool-calls") finishReason = "tool_calls";

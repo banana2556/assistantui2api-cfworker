@@ -6,7 +6,7 @@ import assert from "node:assert";
 import { parseCatalog } from "./src/config.ts";
 
 const url =
-  "https://raw.githubusercontent.com/assistant-ui/assistant-ui/main/apps/docs/constants/model.ts";
+  "https://raw.githubusercontent.com/assistant-ui/assistant-ui/main/apps/docs/lib/model.ts";
 const { map, defaultModel } = parseCatalog(await (await fetch(url)).text());
 
 assert.ok(Object.keys(map).length >= 3, "too few models parsed");

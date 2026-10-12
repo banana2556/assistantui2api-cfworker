@@ -30,7 +30,7 @@ npx wrangler secret put API_KEY
 ## Available Models
 
 The model list is **not hardcoded** — it is fetched at runtime from upstream's own
-[`constants/model.ts`](https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/constants/model.ts)
+[`constants/model.ts`](https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/lib/model.ts)
 and cached for 1 hour (a snapshot in `src/config.ts` is used if that fetch fails).
 Model names are the last path segment of the upstream id, and the first active
 model is the default.
@@ -39,10 +39,10 @@ As of writing:
 
 | Model | Provider |
 |---|---|
-| `gpt-5.6-luna` (default) | OpenAI |
-| `gemini-3.1-flash-lite` | Google |
-| `grok-4-1-fast` | xAI |
-| `deepseek-v4-flash` | DeepSeek |
+| `gpt-6-luna` (default) | OpenAI |
+| `gemini-3.5-flash-lite` | Google |
+| `grok-4.3` | xAI |
+| `deepseek-flash` | DeepSeek |
 | `gpt-oss-20b` | Groq |
 | `gpt-oss-120b` | Groq |
 
@@ -70,7 +70,7 @@ curl https://<your-worker>.workers.dev/v1/chat/completions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-5.6-luna",
+    "model": "gpt-6-luna",
     "stream": true,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
@@ -80,7 +80,7 @@ curl https://<your-worker>.workers.dev/v1/chat/completions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-5.6-luna",
+    "model": "gpt-6-luna",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
@@ -96,7 +96,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-5.6-luna",
+    model="gpt-6-luna",
     messages=[{"role": "user", "content": "Hello!"}],
 )
 print(response.choices[0].message.content)
@@ -133,7 +133,7 @@ API_KEY=test-key
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `API_KEY` | No | _(empty = open access)_ | Bearer token. **Set via `wrangler secret put`**, not in `wrangler.toml`. |
-| `UPSTREAM_URL` | No | `https://www.assistant-ui.com/api/chat` | Upstream chat endpoint. |
+| `UPSTREAM_URL` | No | `https://www.assistant-ui.com/api/doc/chat` | Upstream chat endpoint. |
 | `PROXY_URL` | No | _(empty)_ | Reverse-proxy URL for IP rotation (see below). |
 
 ### Proxy Mode

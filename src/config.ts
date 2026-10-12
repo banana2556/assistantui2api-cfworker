@@ -26,14 +26,14 @@ export const MAX_SYSTEM_LENGTH = 4000;
 
 /** Upstream's own model list (single source of truth for the assistant-ui docs chat). */
 const MODELS_SOURCE_URL =
-  "https://raw.githubusercontent.com/assistant-ui/assistant-ui/main/apps/docs/constants/model.ts";
+  "https://raw.githubusercontent.com/assistant-ui/assistant-ui/main/apps/docs/lib/model.ts";
 
 /** Snapshot used when the source fetch fails. Refresh occasionally. */
 const FALLBACK_SOURCE = `
-  { value: "gpt-5.6-luna", disabled: false, contextWindow: 1_050_000 },
-  { value: "google-ai-studio/gemini-3.1-flash-lite", disabled: false, contextWindow: 1_048_576 },
-  { value: "grok/grok-4-1-fast", disabled: false, contextWindow: 2_000_000 },
-  { value: "deepseek/deepseek-v4-flash", disabled: false, contextWindow: 1_000_000 },
+  { value: "gpt-6-luna", disabled: false, contextWindow: 1_050_000 },
+  { value: "google-ai-studio/gemini-3.5-flash-lite", disabled: false, contextWindow: 1_048_576 },
+  { value: "grok/grok-4.3", disabled: false, contextWindow: 1_000_000 },
+  { value: "deepseek/deepseek-flash", disabled: false, contextWindow: 1_048_576 },
   { value: "groq/openai/gpt-oss-20b", disabled: false, contextWindow: 131_072 },
   { value: "groq/openai/gpt-oss-120b", disabled: false, contextWindow: 131_072 },
 `;
@@ -86,9 +86,17 @@ export async function getCatalog(): Promise<ModelCatalog> {
   return cached;
 }
 
+/** Upstream only serves requests that look like same-origin browser fetches. */
 export const UPSTREAM_HEADERS: Record<string, string> = {
   "content-type": "application/json",
-  "user-agent": "ai-sdk/6.1.0 runtime/browser",
+  "user-agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
   "origin": "https://www.assistant-ui.com",
-  "referer": "https://www.assistant-ui.com/docs",
+  "referer": "https://www.assistant-ui.com/",
+  "sec-fetch-site": "same-origin",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
 };
+
+/** Header carrying the signed anonymous session token (alternative to the aui_anon_session cookie). */
+export const SESSION_HEADER = "x-assistant-ui-anonymous-session";

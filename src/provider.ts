@@ -4,7 +4,7 @@
  * and optional proxy URL for IP rotation.
  */
 
-import { UPSTREAM_HEADERS, type Env } from "./config";
+import { SESSION_HEADER, UPSTREAM_HEADERS } from "./config";
 
 export class UpstreamError extends Error {
   statusCode: number;
@@ -50,6 +50,31 @@ function getHeaders(upstreamUrl: string, proxyUrl?: string): Record<string, stri
   return headers;
 }
 
+/** Anonymous session token, cached per isolate. Upstream issues it for 24h. */
+let session: { token: string; exp: number } | null = null;
+
+/** Fetch (or reuse) the signed `aui_anon_session` token that /api/doc/chat requires. */
+async function getSessionToken(upstreamUrl: string, proxyUrl?: string, force = false): Promise<string> {
+  if (!force && session && session.exp > Date.now() + 60_000) return session.token;
+
+  const sessionUrl = new URL("/api/anonymous-session", upstreamUrl).href;
+  const resp = await fetch(getTargetUrl(sessionUrl, proxyUrl), {
+    headers: getHeaders(sessionUrl, proxyUrl),
+  });
+  // Same origin -> 204 + Set-Cookie; other origins -> JSON { token }
+  const text = await resp.text();
+  const token =
+    resp.headers.get("set-cookie")?.match(/aui_anon_session=([^;]+)/)?.[1] ??
+    (text.startsWith("{") ? JSON.parse(text).token : undefined);
+  if (!resp.ok || !token) {
+    throw new UpstreamError(resp.status >= 400 ? resp.status : 502, `Anonymous session failed: ${text.slice(0, 200)}`);
+  }
+
+  const exp = JSON.parse(atob(token.split(".")[0].replace(/-/g, "+").replace(/_/g, "/"))).exp;
+  session = { token, exp };
+  return token;
+}
+
 /**
  * POST to assistant-ui with retry on 429.
  * Returns the raw Response (for streaming — caller reads response.body).
@@ -61,8 +86,10 @@ export async function callUpstreamStream(
 ): Promise<Response> {
   const targetUrl = getTargetUrl(upstreamUrl, proxyUrl);
   const headers = getHeaders(upstreamUrl, proxyUrl);
+  headers[SESSION_HEADER] = await getSessionToken(upstreamUrl, proxyUrl);
 
   let lastError: UpstreamError | null = null;
+  let refreshed = false;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
@@ -84,6 +111,15 @@ export async function callUpstreamStream(
       );
       // Consume body to free connection
       await resp.text().catch(() => {});
+      continue;
+    }
+
+    // Session expired/revoked: get a fresh one and retry once
+    if (resp.status === 401 && !refreshed) {
+      refreshed = true;
+      await resp.text().catch(() => {});
+      headers[SESSION_HEADER] = await getSessionToken(upstreamUrl, proxyUrl, true);
+      attempt--;
       continue;
     }
 

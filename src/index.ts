@@ -112,7 +112,7 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
     return errorResponse(`Invalid request: ${e.message}`, "invalid_request_error");
   }
 
-  const upstreamUrl = env.UPSTREAM_URL || "https://www.assistant-ui.com/api/chat";
+  const upstreamUrl = env.UPSTREAM_URL || "https://www.assistant-ui.com/api/doc/chat";
   const proxyUrl = env.PROXY_URL || undefined;
 
   if (stream) {
