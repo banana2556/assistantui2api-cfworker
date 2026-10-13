@@ -185,6 +185,7 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
         parsed.finishReason,
         parsed.usage,
         parsed.toolCalls.length > 0 ? parsed.toolCalls : null,
+        parsed.reasoning,
       ),
     );
   } catch (e: any) {

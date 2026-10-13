@@ -108,15 +108,17 @@ export function convertStreamToOpenAI(
                 );
                 roleSent = true;
               }
-            } else if (eventType === "text-delta") {
+            } else if (eventType === "text-delta" || eventType === "reasoning-delta") {
               if (!roleSent) {
                 controller.enqueue(
                   encoder.encode(makeChunk(requestId, model, { role: "assistant", content: "" })),
                 );
                 roleSent = true;
               }
+              // Reasoning summaries go out as `reasoning_content` (DeepSeek-style OpenAI extension)
+              const key = eventType === "text-delta" ? "content" : "reasoning_content";
               controller.enqueue(
-                encoder.encode(makeChunk(requestId, model, { content: event.delta || "" })),
+                encoder.encode(makeChunk(requestId, model, { [key]: event.delta || "" })),
               );
             }
 
@@ -214,6 +216,7 @@ export function convertStreamToOpenAI(
 
 export interface ParsedResponse {
   content: string;
+  reasoning: string;
   toolCalls: any[];
   finishReason: string;
   usage: Record<string, number> | null;
@@ -222,6 +225,7 @@ export interface ParsedResponse {
 /** Parse all SSE lines from a full response body into structured data. */
 export function parseFullResponse(body: string, clientTools: Set<string>): ParsedResponse {
   const contentParts: string[] = [];
+  const reasoningParts: string[] = [];
   const toolCalls: any[] = [];
   const toolArgs: Record<string, string[]> = {};
   const toolMeta: Record<string, { name: string; id: string }> = {};
@@ -243,6 +247,8 @@ export function parseFullResponse(body: string, clientTools: Set<string>): Parse
 
     if (etype === "text-delta") {
       contentParts.push(event.delta || "");
+    } else if (etype === "reasoning-delta") {
+      reasoningParts.push(event.delta || "");
     } else if (etype === "tool-input-start") {
       if (!clientTools.has(event.toolName)) continue;
       const tcId = event.toolCallId || "";
@@ -290,6 +296,7 @@ export function parseFullResponse(body: string, clientTools: Set<string>): Parse
 
   return {
     content: contentParts.join(""),
+    reasoning: reasoningParts.join(""),
     toolCalls,
     finishReason,
     usage,
@@ -304,11 +311,13 @@ export function buildNonStreamResponse(
   finishReason: string = "stop",
   usage: Record<string, number> | null = null,
   toolCalls?: any[] | null,
+  reasoning?: string,
 ): Record<string, any> {
   const message: Record<string, any> = {
     role: "assistant",
     content: content || null,
   };
+  if (reasoning) message.reasoning_content = reasoning;
   if (toolCalls && toolCalls.length > 0) {
     message.tool_calls = toolCalls;
     if (!content) message.content = null;

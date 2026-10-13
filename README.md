@@ -70,7 +70,10 @@ models' own ~1M-token windows are never reached.
 | Output | 4,096 tokens (16,384 for `gpt-6-luna` with `reasoning_effort`) | 8,192 tokens |
 
 `reasoning_effort` (`none`…`xhigh`, capped at `medium` upstream) is passed through;
-only reasoning models (`gpt-6-luna`) use it. `GET /v1/models/all` reports these
+only reasoning models (`gpt-6-luna`) on `/api/chat` use it (`-docs` always runs
+at `low` and ignores it). When it is set, upstream streams a reasoning summary
+(may be empty for light reasoning), returned as `reasoning_content` (in `delta`
+when streaming, in `message` otherwise). `GET /v1/models/all` reports these
 limits per model name.
 
 Use `GET /v1/models` for the live list. `node test-models.mjs` verifies the
