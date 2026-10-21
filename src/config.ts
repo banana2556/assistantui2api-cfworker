@@ -46,16 +46,14 @@ const MODELS_SOURCE_URL =
 
 /** Snapshot used when the source fetch fails. Refresh occasionally. */
 const FALLBACK_SOURCE = `
-  { value: "gpt-6-luna", disabled: false, contextWindow: 1_050_000, reasoning: true },
-  { value: "google-ai-studio/gemini-3.5-flash-lite", disabled: false, contextWindow: 1_048_576 },
-  { value: "grok/grok-4.3", disabled: false, contextWindow: 1_000_000 },
-  { value: "deepseek/deepseek-flash", disabled: false, contextWindow: 1_048_576 },
-  { value: "groq/openai/gpt-oss-20b", disabled: false, contextWindow: 131_072 },
-  { value: "groq/openai/gpt-oss-120b", disabled: false, contextWindow: 131_072 },
+  { value: "deepseek-v4.1-flash", disabled: false, contextWindow: 1_000_000 },
+  { value: "moonshotai/kimi-k3", disabled: false, contextWindow: 1_048_576 },
+  { value: "z-ai/glm-5.3", disabled: false, contextWindow: 1_048_576 },
+  { value: "xiaomi/mimo-v2.6-pro", disabled: false, contextWindow: 1_050_000 },
 `;
 
 /** Listed upstream but always fail there ("An error occurred."); drop them from the catalog. */
-const REMOVED_MODELS = new Set(["gemini-3.5-flash-lite", "deepseek-flash", "gpt-oss-20b", "gpt-oss-120b"]);
+const REMOVED_MODELS = new Set<string>();
 
 const MODEL_RE =
   /value:\s*"([^"]+)"[\s\S]{0,200}?disabled:\s*(true|false)[\s\S]{0,80}?contextWindow:\s*([\d_]+)(?:,\s*reasoning:\s*(true))?/g;

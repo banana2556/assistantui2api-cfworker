@@ -20,7 +20,7 @@ npx wrangler secret put API_KEY
 
 - OpenAI-compatible `/v1/chat/completions` (streaming & non-streaming)
 - Two upstream endpoints, picked by model name: general chat (your system prompt) or the assistant-ui docs assistant
-- `reasoning_effort` passthrough, with reasoning summaries returned as `reasoning_content`
+- `reasoning_effort` passthrough, with reasoning summaries returned as `reasoning_content` (no current model reasons, see [Reasoning](#reasoning))
 - Tool / function calling
 - Vision — images via URL or base64 data URI
 - Handles upstream's anonymous browser session automatically
@@ -31,14 +31,14 @@ npx wrangler secret put API_KEY
 
 ## Models
 
-| Model name | Upstream model | Upstream endpoint | Use it for |
-|---|---|---|---|
-| `gpt-6-luna` (default) | OpenAI GPT-6 Luna | `/api/chat` | General chat; supports `reasoning_effort` |
-| `grok-4.3` | xAI Grok 4.3 | `/api/chat` | General chat |
-| `gpt-6-luna-docs` | OpenAI GPT-6 Luna | `/api/doc/chat` | assistant-ui questions, long inputs |
-| `grok-4.3-docs` | xAI Grok 4.3 | `/api/doc/chat` | assistant-ui questions, long inputs |
+| Model name | Upstream model | Vision |
+|---|---|---|
+| `deepseek-v4.1-flash` (default) | DeepSeek V4.1 Flash | Yes |
+| `kimi-k3` | Moonshot AI Kimi K3 | Yes |
+| `glm-5.3` | Z.ai GLM-5.3 | No (images return 502) |
+| `mimo-v2.6-pro` | Xiaomi MiMo-V2.6-Pro | Yes |
 
-Every model comes in two variants:
+Every model comes in two variants, e.g. `kimi-k3` and `kimi-k3-docs`:
 
 - **`name`** → `/api/chat`: general chat. Your `system` prompt is used as-is.
 - **`name-docs`** → `/api/doc/chat`: upstream's assistant-ui docs assistant. Its own
@@ -53,9 +53,9 @@ The list is **fetched at runtime** from upstream's
 [`lib/model.ts`](https://github.com/assistant-ui/assistant-ui/blob/main/apps/docs/lib/model.ts)
 (cached 1 hour; a snapshot in `src/config.ts` is used if the fetch fails). Models
 upstream lists but that always fail there are dropped via `REMOVED_MODELS` in
-`src/config.ts` (currently Gemini, DeepSeek and both GPT-OSS). Any name not in
-`GET /v1/models` returns **404**. `node test-models.mjs` checks that the upstream
-list still parses.
+`src/config.ts` (currently none). Any name not in `GET /v1/models` returns **404**,
+including models upstream has since dropped (e.g. `gpt-6-luna`, `grok-4.3`).
+`node test-models.mjs` checks that the upstream list still parses.
 
 ### Limits
 
@@ -69,7 +69,7 @@ models' own ~1M-token windows are never reached.
 | Single message | 12,000 chars | 24,000 chars |
 | Messages | 20 | unlimited |
 | System prompt | 4,000 chars | 4,000 chars |
-| Output | 4,096 tokens (16,384 for `gpt-6-luna` with `reasoning_effort`) | 8,192 tokens |
+| Output | 4,096 tokens (16,384 for reasoning models with `reasoning_effort`) | 8,192 tokens |
 
 `GET /v1/models/all` reports these per model name (`context_window` is in chars;
 the model's own window is `model_context_window`).
@@ -77,17 +77,14 @@ the model's own window is `model_context_window`).
 ### Reasoning
 
 `reasoning_effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`; upstream
-caps it at `medium`) is passed through. Only `gpt-6-luna` on `/api/chat` uses it:
+caps it at `medium`) is passed through, and any reasoning summary comes back in
+`delta.reasoning_content` when streaming and in `message.reasoning_content` otherwise.
+On `/api/chat` it also raises a reasoning model's output cap to 16,384 tokens.
 
-| `reasoning_effort` | Behaviour |
-|---|---|
-| _(omitted)_ | Reasons at `low`, no summary, output cap 4,096 |
-| any value | Reasons at that level (`none` = off), output cap 16,384, summary returned as `reasoning_content` |
-
-The summary arrives in `delta.reasoning_content` when streaming and in
-`message.reasoning_content` otherwise; it may be empty for light reasoning.
-`-docs` models always reason at `low` and ignore `reasoning_effort`; `grok-4.3`
-ignores it.
+Upstream currently marks **no** model as reasoning-capable: `reasoning_effort` is
+still passed through, but no current model returns `reasoning_content`. If upstream
+adds `reasoning: true` to a model, it shows up in `GET /v1/models/all` as
+`max_output_tokens: 16384` with `max_output_tokens_note`.
 
 ## API Endpoints
 
@@ -113,7 +110,7 @@ curl https://<your-worker>.workers.dev/v1/chat/completions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-6-luna",
+    "model": "deepseek-v4.1-flash",
     "stream": true,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
@@ -123,21 +120,11 @@ curl https://<your-worker>.workers.dev/v1/chat/completions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "grok-4.3",
+    "model": "kimi-k3",
     "messages": [
       {"role": "system", "content": "You are a pirate. Always start with Arr."},
       {"role": "user", "content": "Say hi in 5 words"}
     ]
-  }'
-
-# Reasoning (response includes message.reasoning_content)
-curl https://<your-worker>.workers.dev/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-6-luna",
-    "reasoning_effort": "medium",
-    "messages": [{"role": "user", "content": "How many n < 100 make n^2 + n + 41 composite?"}]
   }'
 
 # Docs assistant (looks things up in the assistant-ui docs itself)
@@ -145,7 +132,7 @@ curl https://<your-worker>.workers.dev/v1/chat/completions \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-6-luna-docs",
+    "model": "deepseek-v4.1-flash-docs",
     "messages": [{"role": "user", "content": "What does the Thread component do?"}]
   }'
 ```
@@ -162,26 +149,20 @@ client = OpenAI(
 
 # Basic
 response = client.chat.completions.create(
-    model="gpt-6-luna",
+    model="deepseek-v4.1-flash",
     messages=[{"role": "user", "content": "Hello!"}],
 )
 print(response.choices[0].message.content)
 
-# Streaming with reasoning: reasoning_content is an extra field on the delta
+# Streaming
 stream = client.chat.completions.create(
-    model="gpt-6-luna",
-    reasoning_effort="medium",
+    model="kimi-k3",
     stream=True,
     messages=[{"role": "user", "content": "Is 1001 prime? Explain briefly."}],
 )
 for chunk in stream:
-    if not chunk.choices:
-        continue
-    delta = chunk.choices[0].delta
-    if getattr(delta, "reasoning_content", None):
-        print(delta.reasoning_content, end="")  # thinking
-    if delta.content:
-        print(delta.content, end="")            # answer
+    if chunk.choices and chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
 ```
 
 ### Tool calling
@@ -203,7 +184,7 @@ tools = [{
 }]
 messages = [{"role": "user", "content": "What is TSMC (TSM) trading at?"}]
 
-first = client.chat.completions.create(model="gpt-6-luna", tools=tools, messages=messages)
+first = client.chat.completions.create(model="deepseek-v4.1-flash", tools=tools, messages=messages)
 call = first.choices[0].message.tool_calls[0]  # finish_reason == "tool_calls"
 
 messages.append(first.choices[0].message)
@@ -212,15 +193,17 @@ messages.append({
     "tool_call_id": call.id,
     "content": json.dumps({"price": 312.5, "currency": "USD"}),  # your tool's result
 })
-final = client.chat.completions.create(model="gpt-6-luna", tools=tools, messages=messages)
+final = client.chat.completions.create(model="deepseek-v4.1-flash", tools=tools, messages=messages)
 print(final.choices[0].message.content)
 ```
 
 ### Vision
 
+Not supported by `glm-5.3`.
+
 ```python
 response = client.chat.completions.create(
-    model="gpt-6-luna",
+    model="deepseek-v4.1-flash",
     messages=[{
         "role": "user",
         "content": [
@@ -239,7 +222,7 @@ Errors use the OpenAI shape `{"error": {"message": "...", "type": "..."}}`:
 | Status | When | Example message |
 |---|---|---|
 | 401 | Missing or wrong API key | `Invalid API key` |
-| 404 | Model not in `/v1/models` | ``The model `gemini-3.5-flash-lite` does not exist`` |
+| 404 | Model not in `/v1/models` | ``The model `gpt-6-luna` does not exist`` |
 | 400 | Over an upstream [limit](#limits) | `Too many messages (max 20)`, `Input too long`, `Single message too long` |
 | 429 | Upstream rate limit, after 3 retries | `Rate limited (attempt 4/4)` |
 | 502 | Upstream model error | `Upstream error: An error occurred.` |
