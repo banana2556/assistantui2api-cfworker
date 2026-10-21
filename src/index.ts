@@ -9,6 +9,7 @@
 
 import { type Env, DOCS_SUFFIX, ENDPOINT_LIMITS, getCatalog } from "./config";
 import { openaiToAiSdk, genId } from "./converter/messages";
+import { splitLongUserMessages } from "./converter/split";
 import {
   convertStreamToOpenAI,
   parseFullResponse,
@@ -137,6 +138,7 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
   let payload: Record<string, any>;
   try {
     payload = openaiToAiSdk(body.messages || [], upstreamModel, catalog, tools);
+    payload.messages = splitLongUserMessages(payload.messages, docs ? ENDPOINT_LIMITS.docs : ENDPOINT_LIMITS.chat);
     // Upstream caps effort at "medium"; on /api/chat it also lifts the output cap to 16k for reasoning models
     if (body.reasoning_effort) payload.config.reasoningEffort = body.reasoning_effort;
   } catch (e: any) {

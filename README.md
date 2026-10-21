@@ -71,6 +71,11 @@ models' own ~1M-token windows are never reached.
 | System prompt | 4,000 chars | 4,000 chars |
 | Output | 4,096 tokens (16,384 for reasoning models with `reasoning_effort`) | 8,192 tokens |
 
+A user message over the single-message limit is **split automatically** into
+consecutive user messages that each fit, as long as the result stays within the
+total and message-count limits; otherwise it is sent as-is and upstream's 400 is
+returned. Other roles are never split. `node test-split.mjs` checks the splitting.
+
 `GET /v1/models/all` reports these per model name (`context_window` is in chars;
 the model's own window is `model_context_window`).
 
@@ -223,7 +228,7 @@ Errors use the OpenAI shape `{"error": {"message": "...", "type": "..."}}`:
 |---|---|---|
 | 401 | Missing or wrong API key | `Invalid API key` |
 | 404 | Model not in `/v1/models` | ``The model `gpt-6-luna` does not exist`` |
-| 400 | Over an upstream [limit](#limits) | `Too many messages (max 20)`, `Input too long`, `Single message too long` |
+| 400 | Over an upstream [limit](#limits) (after auto-splitting) | `Too many messages (max 20)`, `Input too long`, `Single message too long` |
 | 429 | Upstream rate limit, after 3 retries | `Rate limited (attempt 4/4)` |
 | 502 | Upstream model error | `Upstream error: An error occurred.` |
 
