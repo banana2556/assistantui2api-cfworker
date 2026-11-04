@@ -22,7 +22,7 @@ npx wrangler secret put API_KEY
 - Two upstream endpoints, picked by model name: general chat (your system prompt) or the assistant-ui docs assistant
 - `reasoning_effort` passthrough, with reasoning summaries returned as `reasoning_content` (no current model returns one, see [Reasoning](#reasoning))
 - Tool / function calling
-- Vision — images via URL or base64 data URI (large base64 images need the optional [KV binding](#images))
+- Vision — images via URL or base64 data URI (large base64 images go through KV, see [Images](#images))
 - Long chats: history over upstream's 20-message cap is folded automatically
 - Handles upstream's anonymous browser session automatically
 - API key authentication (timing-safe)
@@ -245,15 +245,11 @@ roughly **12 KB** of base64 on `name` models (about a 60×60 photo) and **24 KB*
 
 - **Image URLs** always fit. Upstream downloads them itself, so the host must allow
   that (GitHub avatars work; Wikimedia returns 502).
-- **Large base64 images** work once you bind a KV namespace named `IMAGES`. The worker
-  then stores any data URI over 2,000 chars in KV for 1 hour and sends upstream a
-  `https://<your-worker>/img/<random key>` URL instead:
-
-  ```bash
-  npx wrangler kv namespace create IMAGES
-  # paste the printed id into the [[kv_namespaces]] block in wrangler.toml, uncomment it, then
-  npx wrangler deploy
-  ```
+- **Large base64 images** go through a KV namespace bound as `IMAGES`. The worker
+  stores any data URI over 2,000 chars there for 1 hour and sends upstream a
+  `https://<your-worker>/img/<random key>` URL instead. `wrangler.toml` declares the
+  binding without an id, so wrangler 4 creates the namespace on the first deploy and
+  reuses it afterwards (also under Cloudflare's Git builds); no setup needed.
 
   The `/img/` route is public (upstream has to fetch it); keys are 32 random characters.
   KV's free tier allows 1,000 writes a day, i.e. 1,000 large images. This doesn't work
@@ -267,7 +263,7 @@ Errors use the OpenAI shape `{"error": {"message": "...", "type": "..."}}`:
 |---|---|---|
 | 401 | Missing or wrong API key | `Invalid API key` |
 | 404 | Model not in `/v1/models` | ``The model `kimi-k3` does not exist`` |
-| 400 | Over an upstream [limit](#limits) (after splitting and folding), or a large base64 image without [KV](#images) | `Input too long`, `Single message too long`, `Too many messages (max 20)` |
+| 400 | Over an upstream [limit](#limits) (after splitting and folding) | `Input too long`, `Single message too long`, `Too many messages (max 20)` |
 | 429 | Upstream rate limit, after 3 retries | `Rate limited (attempt 4/4)` |
 | 502 | Upstream model error | `Upstream error: An error occurred.` |
 
@@ -308,7 +304,7 @@ API_KEY=test-key
 | `API_KEY` | No | _(empty = open access)_ | Bearer token. **Set via `wrangler secret put`**, not in `wrangler.toml`. |
 | `UPSTREAM_URL` | No | `https://www.assistant-ui.com` | Upstream origin (path ignored; picked per model). |
 | `PROXY_URL` | No | _(empty)_ | Reverse-proxy URL for IP rotation (see below). |
-| `IMAGES` (KV binding) | No | _(unbound)_ | Hosts large base64 images; see [Images](#images). |
+| `IMAGES` (KV binding) | Auto | _(created on first deploy)_ | Hosts large base64 images; see [Images](#images). |
 
 ### Proxy Mode
 
