@@ -56,8 +56,9 @@ function splitMessage(msg: any, max: number): any[] {
   return chunks;
 }
 
-/** Split oversized user messages, unless the result would break the total-size or count limits. */
-export function splitLongUserMessages(messages: any[], limits: Limits): any[] {
+/** Fold history over the count limit, then split oversized user messages, unless the result would break the total-size or count limits. */
+export function splitLongUserMessages(input: any[], limits: Limits): any[] {
+  const messages = foldHistory(input, limits);
   const out = messages.flatMap((m) =>
     m.role === "user" && size(m) > limits.maxMessageChars ? splitMessage(m, limits.maxMessageChars) : [m],
   );
@@ -65,4 +66,39 @@ export function splitLongUserMessages(messages: any[], limits: Limits): any[] {
   if (limits.maxMessages !== null && out.length > limits.maxMessages) return messages;
   if (size(out) > limits.maxInputChars) return messages;
   return out;
+}
+
+const transcriptLine = (m: any): string => {
+  const who = m.role === "assistant" ? "Assistant" : "User";
+  const bits = m.parts.map((p: any) =>
+    p.type === "text"
+      ? p.text
+      : p.type === "tool-invocation"
+        ? `[called tool ${p.toolName}(${JSON.stringify(p.input)})${"output" in p ? ` -> ${JSON.stringify(p.output)}` : ""}]`
+        : "",
+  );
+  return `${who}: ${bits.filter(Boolean).join("\n")}`;
+};
+
+/** How many messages `m` becomes after splitLongUserMessages. */
+const splitCount = (m: any, max: number) => (m.role === "user" && size(m) > max ? splitMessage(m, max).length : 1);
+
+/**
+ * Over the message-count limit: fold the oldest messages into one user message holding a text
+ * transcript (images kept as parts), folding just enough that the split result fits the count.
+ * The last message is never folded. Unchanged if nothing fits (upstream returns its own error).
+ */
+export function foldHistory(messages: any[], limits: Limits): any[] {
+  const max = limits.maxMessages;
+  if (max === null || messages.length <= max) return messages;
+  for (let k = messages.length - max + 1; k < messages.length; k++) {
+    const old = messages.slice(0, k);
+    const text = "Earlier conversation, folded into one message to fit the message limit:\n\n" + old.map(transcriptLine).join("\n\n");
+    const files = old.flatMap((m) => m.parts.filter((p: any) => p.type === "file"));
+    const folded = { role: "user", parts: [{ type: "text", text }, ...files], metadata: { custom: {} }, id: `${old[0].id}_fold` };
+    const rest = messages.slice(k);
+    const count = splitCount(folded, limits.maxMessageChars) + rest.reduce((n, m) => n + splitCount(m, limits.maxMessageChars), 0);
+    if (count <= max) return [folded, ...rest];
+  }
+  return messages;
 }

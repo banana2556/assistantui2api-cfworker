@@ -6,6 +6,8 @@ export interface Env {
   UPSTREAM_URL: string;
   /** Optional proxy URL — route upstream requests through your own VPS to avoid shared CF egress IP rate limits. */
   PROXY_URL: string;
+  /** Optional KV namespace: large base64 images are stored here and sent upstream as URLs. */
+  IMAGES?: KVNamespace;
 }
 
 export interface ModelInfo {
@@ -46,10 +48,10 @@ const MODELS_SOURCE_URL =
 
 /** Snapshot used when the source fetch fails. Refresh occasionally. */
 const FALLBACK_SOURCE = `
-  { value: "deepseek-v4.1-flash", disabled: false, contextWindow: 1_000_000 },
-  { value: "moonshotai/kimi-k3", disabled: false, contextWindow: 1_048_576 },
-  { value: "z-ai/glm-5.3", disabled: false, contextWindow: 1_048_576 },
-  { value: "xiaomi/mimo-v2.6-pro", disabled: false, contextWindow: 1_050_000 },
+  { value: "deepseek/deepseek-flash", disabled: false, contextWindow: 1_000_000 },
+  { value: "gpt-6-luna", disabled: false, contextWindow: 1_050_000, reasoning: true },
+  { value: "anthropic/claude-haiku-5-5", disabled: false, contextWindow: 1_000_000 },
+  { value: "zai/glm-5.3-flash", disabled: false, contextWindow: 1_000_000 },
 `;
 
 /** Listed upstream but always fail there ("An error occurred."); drop them from the catalog. */

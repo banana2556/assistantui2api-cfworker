@@ -61,6 +61,43 @@ function isAuthorized(request: Request, env: Env): boolean {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Image hosting                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Data URIs above this many chars are moved to KV (upstream counts them as message text). */
+const INLINE_IMAGE_MAX = 2000;
+const IMAGE_TTL = 3600;
+
+/**
+ * Upstream has no upload endpoint and counts a data URI against the per-message limit,
+ * so any real photo is "Single message too long". Store it in KV and pass a URL instead.
+ * ponytail: KV is eventually consistent; upstream fetching from another region right after
+ * the write may 404 (rare in practice). R2 if that ever shows up.
+ */
+async function offloadImages(messages: any[], env: Env, origin: string): Promise<void> {
+  if (!env.IMAGES) return;
+  for (const part of messages.flatMap((m) => m.parts)) {
+    if (part.type !== "file" || !part.url?.startsWith("data:") || part.url.length <= INLINE_IMAGE_MAX) continue;
+    const comma = part.url.indexOf(",");
+    const meta = part.url.slice(5, comma);
+    const data = part.url.slice(comma + 1);
+    const bytes = meta.endsWith(";base64")
+      ? Uint8Array.from(atob(data), (c) => c.charCodeAt(0))
+      : new TextEncoder().encode(decodeURIComponent(data));
+    const key = genId("img", 32); // unguessable: /img/ is public so upstream can fetch it
+    await env.IMAGES.put(key, bytes, { expirationTtl: IMAGE_TTL, metadata: { type: part.mediaType } });
+    part.url = `${origin}/img/${key}`;
+  }
+}
+
+/** GET /img/:key — serve an offloaded image to upstream (no auth). */
+async function handleImage(key: string, env: Env): Promise<Response> {
+  const hit = env.IMAGES && (await env.IMAGES.getWithMetadata<{ type: string }>(key, "arrayBuffer"));
+  if (!hit?.value) return errorResponse("Not Found", "not_found", 404);
+  return new Response(hit.value, { headers: { "Content-Type": hit.metadata?.type || "application/octet-stream" } });
+}
+
+/* ------------------------------------------------------------------ */
 /*  Route handlers                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -138,6 +175,7 @@ async function handleChatCompletions(request: Request, env: Env): Promise<Respon
   let payload: Record<string, any>;
   try {
     payload = openaiToAiSdk(body.messages || [], upstreamModel, catalog, tools);
+    await offloadImages(payload.messages, env, new URL(request.url).origin);
     payload.messages = splitLongUserMessages(payload.messages, docs ? ENDPOINT_LIMITS.docs : ENDPOINT_LIMITS.chat);
     // Upstream caps effort at "medium"; on /api/chat it also lifts the output cap to 16k for reasoning models
     if (body.reasoning_effort) payload.config.reasoningEffort = body.reasoning_effort;
@@ -216,6 +254,7 @@ export default {
     if (path === "/" || path === "") return handleRoot();
     if (path === "/health") return handleHealth();
     if (path === "/ping") return jsonResponse({ message: "pong" });
+    if (request.method === "GET" && path.startsWith("/img/")) return handleImage(path.slice(5), env);
 
     // Auth check for API endpoints
     if (!isAuthorized(request, env)) {

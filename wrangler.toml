@@ -12,3 +12,10 @@ PROXY_URL = ""
 # ⚠ Do NOT put your API key here — use Cloudflare secrets instead:
 #   npx wrangler secret put API_KEY
 # Leaving API_KEY unset means open access (no auth required).
+
+# Optional: host large base64 images so upstream gets a URL instead of the data URI
+# (upstream counts the data URI as message text: anything over ~12 KB is rejected).
+#   npx wrangler kv namespace create IMAGES   → paste the id below and uncomment
+# [[kv_namespaces]]
+# binding = "IMAGES"
+# id = "<your-namespace-id>"
