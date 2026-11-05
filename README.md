@@ -113,7 +113,7 @@ session it currently returns no `reasoning_content` (see the note under [Models]
 | `GET` | `/` | No | Health check |
 | `GET` | `/health` | No | Health check |
 | `GET` | `/ping` | No | Pong |
-| `GET` | `/img/:key` | No | Serves a base64 image moved to KV (random key, expires after 1 hour) |
+| `GET` | `/img/:key` | No | Serves a base64 image moved to KV (key = SHA-256, expires after 1 day) |
 | `GET` | `/v1/models` | Yes | List models |
 | `GET` | `/v1/models/all` | Yes | List models with limits (and any disabled upstream) |
 | `POST` | `/v1/chat/completions` | Yes | Chat completions |
@@ -246,13 +246,16 @@ roughly **12 KB** of base64 on `name` models (about a 60×60 photo) and **24 KB*
 - **Image URLs** always fit. Upstream downloads them itself, so the host must allow
   that (GitHub avatars work; Wikimedia returns 502).
 - **Large base64 images** go through a KV namespace bound as `IMAGES`. The worker
-  stores any data URI over 2,000 chars there for 1 hour and sends upstream a
-  `https://<your-worker>/img/<random key>` URL instead. `wrangler.toml` declares the
+  stores any data URI over 2,000 chars there for 1 day and sends upstream a
+  `https://<your-worker>/img/<sha-256 of the image>` URL instead. Clients resend the
+  whole history every turn, so each image is written **once** (and again only when
+  under an hour of its day is left); later turns cost one KV read per image. `wrangler.toml` declares the
   binding without an id, so wrangler 4 creates the namespace on the first deploy and
   reuses it afterwards (also under Cloudflare's Git builds); no setup needed.
 
-  The `/img/` route is public (upstream has to fetch it); keys are 32 random characters.
-  KV's free tier allows 1,000 writes a day, i.e. 1,000 large images. This doesn't work
+  The `/img/` route is public (upstream has to fetch it), but a key is the image's
+  SHA-256, so only someone who already has the image can find it. KV's free tier allows
+  1,000 writes and 100,000 reads a day, i.e. about 1,000 distinct large images a day. This doesn't work
   under `wrangler dev`, because upstream can't reach localhost.
 
 ### Errors

@@ -66,11 +66,15 @@ function isAuthorized(request: Request, env: Env): boolean {
 
 /** Data URIs above this many chars are moved to KV (upstream counts them as message text). */
 const INLINE_IMAGE_MAX = 2000;
-const IMAGE_TTL = 3600;
+const IMAGE_TTL = 86_400;
+/** An already-stored image is rewritten (to extend its TTL) only when less than this is left. */
+const IMAGE_TTL_MIN_LEFT = 3600;
 
 /**
  * Upstream has no upload endpoint and counts a data URI against the per-message limit,
  * so any real photo is "Single message too long". Store it in KV and pass a URL instead.
+ * Clients resend the whole history every turn, so images are keyed by content hash and
+ * written once: KV's free tier has 1,000 writes/day but 100,000 reads/day.
  * ponytail: KV is eventually consistent; upstream fetching from another region right after
  * the write may 404 (rare in practice). R2 if that ever shows up.
  */
@@ -84,8 +88,17 @@ async function offloadImages(messages: any[], env: Env, origin: string): Promise
     const bytes = meta.endsWith(";base64")
       ? Uint8Array.from(atob(data), (c) => c.charCodeAt(0))
       : new TextEncoder().encode(decodeURIComponent(data));
-    const key = genId("img", 32); // unguessable: /img/ is public so upstream can fetch it
-    await env.IMAGES.put(key, bytes, { expirationTtl: IMAGE_TTL, metadata: { type: part.mediaType } });
+    // Content hash: the same image always maps to the same key, and /img/ (public, so upstream
+    // can fetch it) can't be enumerated without already having the image.
+    const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    const key = "img_" + Array.from(hash, (b) => b.toString(16).padStart(2, "0")).join("");
+    const now = Math.floor(Date.now() / 1000);
+    const hit = await env.IMAGES.getWithMetadata<{ type: string; exp: number }>(key, "stream");
+    await hit.value?.cancel();
+    if (!hit.metadata?.exp || hit.metadata.exp - now < IMAGE_TTL_MIN_LEFT) {
+      const metadata = { type: part.mediaType, exp: now + IMAGE_TTL };
+      await env.IMAGES.put(key, bytes, { expirationTtl: IMAGE_TTL, metadata });
+    }
     part.url = `${origin}/img/${key}`;
   }
 }
